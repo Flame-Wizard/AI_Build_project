@@ -21,6 +21,7 @@ app.add_middleware(
 # Global in-memory storage for the uploaded dataframe (for demo purposes)
 # In production, you'd store this in a database or cloud storage
 global_df = pd.DataFrame()
+global_forecast_cache = []
 
 @app.post("/api/upload")
 async def upload_csv(file: UploadFile = File(...)):
@@ -37,7 +38,7 @@ async def upload_csv(file: UploadFile = File(...)):
 
 @app.get("/api/forecast/prophet", response_model=ProphetResponse)
 async def get_prophet_forecast():
-    global global_df
+    global global_df, global_forecast_cache
     # If no data is uploaded, use some default dummy data to prevent frontend crash
     if global_df.empty:
         dummy_data = pd.DataFrame({
@@ -48,6 +49,7 @@ async def get_prophet_forecast():
     else:
         forecast = generate_forecast(global_df, periods=14)
     
+    global_forecast_cache = forecast
     return {"data": forecast}
 
 @app.get("/api/analytics/trend", response_model=TrendResponse)
@@ -66,14 +68,14 @@ async def get_trend():
 
 @app.get("/api/insights", response_model=InsightsResponse)
 async def get_insights():
-    global global_df
+    global global_df, global_forecast_cache
     if global_df.empty:
         dummy_data = pd.DataFrame({
             'date': pd.date_range(start='2023-01-01', periods=30, freq='D'),
             'demand': [100 + (i * 2) + (i % 5 * 10) for i in range(30)]
         })
-        insights = generate_insights(dummy_data)
+        insights = generate_insights(dummy_data, [])
     else:
-        insights = generate_insights(global_df)
+        insights = generate_insights(global_df, global_forecast_cache)
         
     return {"insights": insights}

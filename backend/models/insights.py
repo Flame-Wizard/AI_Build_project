@@ -3,7 +3,7 @@ import json
 import pandas as pd
 from huggingface_hub import InferenceClient
 
-def generate_insights(df: pd.DataFrame):
+def generate_insights(df: pd.DataFrame, forecast_data: list = None):
     """
     Generate insights using a Hugging Face model (like Gemma or GLM-4) 
     via the Hugging Face Inference API.
@@ -25,13 +25,24 @@ def generate_insights(df: pd.DataFrame):
         # Create a summary of the data
         summary = df.describe().to_json()
         
+        forecast_context = ""
+        if forecast_data:
+            future_only = [f for f in forecast_data if f.get("actual") is None]
+            if future_only:
+                avg_future = sum([f['yhat'] for f in future_only]) / len(future_only)
+                max_future = max([f['yhat'] for f in future_only])
+                forecast_context = f"\nProphet ML Forecast: Projected average future value is {avg_future:.2f}, peaking at {max_future:.2f}."
+
         prompt = f"""
-        You are a Data Scientist AI. Analyze the following statistical summary of a company's data and provide exactly 3 key business insights.
-        Data summary: {summary}
+        You are a Data Scientist AI. Analyze the following statistical summary of a company's historical data.
+        Historical data summary: {summary}
+        {forecast_context}
+        
+        Based on this data AND the Prophet machine learning forecast, provide exactly 3 key predictive business insights.
         
         Respond ONLY in the following JSON format:
         [
-          {{"title": "Short title", "description": "1 sentence description", "type": "warning|success|info", "icon_type": "AlertTriangle|CheckCircle|Zap"}}
+          {{"title": "Short title", "description": "1 sentence predictive description", "type": "warning|success|info", "icon_type": "AlertTriangle|CheckCircle|Zap"}}
         ]
         """
         

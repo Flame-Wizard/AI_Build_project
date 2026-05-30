@@ -52,12 +52,19 @@ def generate_forecast(df: pd.DataFrame, periods: int = 4):
         date_str = row['ds'].strftime('%Y-%m-%d')
         actual_val = actuals_dict.get(date_str)
         
+        # Anomaly detection: flag if actual value falls outside 80% confidence interval
+        is_anomaly = False
+        if actual_val is not None:
+            if actual_val < row['yhat_lower'] or actual_val > row['yhat_upper']:
+                is_anomaly = True
+        
         result.append({
             "date": date_str,
             "actual": actual_val,
             "yhat": round(row['yhat'], 2),
             "lower": round(row['yhat_lower'], 2),
-            "upper": round(row['yhat_upper'], 2)
+            "upper": round(row['yhat_upper'], 2),
+            "is_anomaly": is_anomaly
         })
 
     return result
