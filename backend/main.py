@@ -80,3 +80,63 @@ async def get_insights():
         insights = generate_insights(global_df, global_forecast_cache)
         
     return {"insights": insights}
+
+@app.get("/api/summary")
+async def get_summary():
+    """Returns high-level KPI metrics computed from the uploaded CSV."""
+    global global_df
+    if global_df.empty:
+        return {
+            "row_count": 0,
+            "columns": [],
+            "metrics": [],
+            "has_data": False
+        }
+
+    try:
+        numeric_cols = [col for col in global_df.columns if pd.api.types.is_numeric_dtype(global_df[col])]
+        date_cols = [col for col in global_df.columns if 'date' in col.lower() or 'time' in col.lower()]
+        
+        metrics = []
+        for col in numeric_cols[:4]:  # Show at most 4 KPI metrics
+            series = global_df[col].dropna()
+            if len(series) >= 2:
+                first_half = series.iloc[:len(series)//2].mean()
+                second_half = series.iloc[len(series)//2:].mean()
+                change_pct = ((second_half - first_half) / first_half * 100) if first_half != 0 else 0
+                metrics.append({
+                    "title": col.replace('_', ' ').title(),
+                    "value": round(series.mean(), 2),
+                    "max": round(series.max(), 2),
+                    "min": round(series.min(), 2),
+                    "total": round(series.sum(), 2),
+                    "change": round(change_pct, 1),
+                    "changeLabel": "trend vs first half",
+                    "count": len(series)
+                })
+        
+        date_range = None
+        if date_cols:
+            try:
+                dates = pd.to_datetime(global_df[date_cols[0]])
+                date_range = {
+                    "start": dates.min().strftime('%Y-%m-%d'),
+                    "end": dates.max().strftime('%Y-%m-%d'),
+                    "days": (dates.max() - dates.min()).days
+                }
+            except:
+                pass
+        
+        return {
+            "row_count": len(global_df),
+            "columns": list(global_df.columns),
+            "metrics": metrics,
+            "date_range": date_range,
+            "has_data": True
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating summary: {str(e)}")
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "has_data": not global_df.empty, "rows": len(global_df)}

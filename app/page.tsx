@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
@@ -30,7 +30,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const metrics = [
+const defaultMetrics = [
   {
     title: "Total Revenue",
     value: "$284,521",
@@ -67,9 +67,38 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>("overview")
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [csvLoaded, setCsvLoaded] = useState(false)
+  const [csvSummary, setCsvSummary] = useState<any>(null)
+  const [metrics, setMetrics] = useState(defaultMetrics)
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
   const handleUploadSuccess = () => {
     setRefreshKey(prev => prev + 1)
+    setCsvLoaded(true)
+    // Fetch summary metrics from the backend
+    fetch(`${apiUrl}/api/summary`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.has_data && data.metrics.length > 0) {
+          setCsvSummary(data)
+          // Build dynamic metric cards from CSV columns
+          const iconMap = [DollarSign, Package, TrendingUp, Users]
+          const dynamicMetrics = data.metrics.map((m: any, i: number) => ({
+            title: m.title,
+            value: m.total > 10000 
+              ? m.total.toLocaleString(undefined, {maximumFractionDigits: 0})
+              : m.value.toLocaleString(undefined, {maximumFractionDigits: 2}),
+            change: m.change,
+            changeLabel: m.changeLabel,
+            icon: iconMap[i] ? <>{iconMap[i] && <span />}</> : <TrendingUp className="h-5 w-5" />,
+          }))
+          setMetrics(dynamicMetrics.length > 0 ? dynamicMetrics : defaultMetrics)
+          // Auto-switch to analytics tab
+          setActiveTab("analytics")
+        }
+      })
+      .catch(err => console.error("Failed to fetch summary:", err))
   }
 
   const tabs = [
@@ -98,6 +127,25 @@ export default function Dashboard() {
         <div className="p-6 lg:p-8">
           {/* File Upload Zone */}
           <FileUpload onUploadSuccess={handleUploadSuccess} />
+
+          {/* CSV Loaded Banner */}
+          {csvLoaded && csvSummary && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3"
+            >
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                ✅ CSV loaded: <strong>{csvSummary.row_count} rows</strong> · Columns: <strong>{csvSummary.columns.join(", ")}</strong>
+                {csvSummary.date_range && ` · Date range: ${csvSummary.date_range.start} → ${csvSummary.date_range.end}`}
+              </p>
+              <button 
+                onClick={() => setActiveTab("analytics")}
+                className="ml-auto text-xs font-medium text-emerald-600 dark:text-emerald-400 underline"
+              >View AI Analysis →</button>
+            </motion.div>
+          )}
 
           {/* Metrics Grid */}
           <section className="mb-8">
@@ -253,23 +301,51 @@ export default function Dashboard() {
                 transition={{ duration: 0.2 }}
                 className="space-y-6"
               >
-                <div className="grid gap-6 lg:grid-cols-3">
-                  <div className="lg:col-span-2">
-                    <TrendAnalysis refreshKey={refreshKey} />
-                  </div>
-                  <div className="flex flex-col h-full gap-6">
-                    <div className="shrink-0">
-                      <AIInsights refreshKey={refreshKey} />
+                {/* AI/ML Analysis Header */}
+                <div className="card-base p-6 border border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-transparent">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                        <span className="text-2xl">🤖</span> AI & ML Analysis Center
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {csvLoaded && csvSummary
+                          ? `Powered by Prophet ML + Groq Llama 3.3 70B · ${csvSummary.row_count} rows analyzed`
+                          : "Upload a CSV file above to generate AI-powered demand forecasting and insights"}
+                      </p>
                     </div>
-                    <div className="flex-1 min-h-0 *:h-full">
-                      <ForecastAccuracy />
+                    <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${csvLoaded ? "bg-emerald-500/15 text-emerald-500" : "bg-amber-500/15 text-amber-500"}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${csvLoaded ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                        {csvLoaded ? "Live CSV Data" : "Demo Mode"}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 px-3 py-1 text-xs font-medium text-violet-500">
+                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500 animate-pulse" />
+                        Prophet + Llama 3.3
+                      </span>
                     </div>
                   </div>
                 </div>
 
+                {/* Prophet Demand Forecast — Full Width Hero */}
+                <div>
+                  <ProphetForecastChart refreshKey={refreshKey} />
+                </div>
+
+                {/* Trend Analysis + AI Insights side by side */}
+                <div className="grid gap-6 lg:grid-cols-3">
+                  <div className="lg:col-span-2">
+                    <TrendAnalysis refreshKey={refreshKey} />
+                  </div>
+                  <div className="flex flex-col gap-6">
+                    <AIInsights refreshKey={refreshKey} />
+                    <ForecastAccuracy />
+                  </div>
+                </div>
+
+                {/* Pareto Chart */}
                 <div className="grid gap-6 lg:grid-cols-2">
                   <ParetoChart />
-                  <ProphetForecastChart refreshKey={refreshKey} />
                 </div>
               </motion.div>
             )}
