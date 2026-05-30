@@ -73,6 +73,14 @@ export default function Dashboard() {
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
+  // Wake up the Render free-tier backend as soon as the page loads
+  useEffect(() => {
+    fetch(`${apiUrl}/api/health`)
+      .then(res => res.json())
+      .then(d => console.log("Backend alive:", d))
+      .catch(() => console.warn("Backend is sleeping — it may take up to 60s to wake up on Render free tier"))
+  }, [])
+
   const handleUploadSuccess = () => {
     setRefreshKey(prev => prev + 1)
     setCsvLoaded(true)

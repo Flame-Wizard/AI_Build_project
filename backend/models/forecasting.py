@@ -11,12 +11,17 @@ def generate_forecast(df: pd.DataFrame, periods: int = 4):
     if len(df) == 0:
         return []
 
-    # Try to find a date column and a value column
-    date_col = next((col for col in df.columns if 'date' in col.lower() or 'time' in col.lower()), df.columns[0])
+    # Try to find a date column
+    date_col = next((col for col in df.columns if 'date' in col.lower() or 'time' in col.lower() or 'month' in col.lower() or 'week' in col.lower() or 'year' in col.lower()), None)
+    if date_col is None:
+        date_col = df.columns[0]  # Fallback to first column
     
-    # Try to find value column (demand, sales, value, etc.)
-    val_cols = [col for col in df.columns if col.lower() in ['demand', 'sales', 'value', 'amount', 'profit']]
-    val_col = val_cols[0] if val_cols else df.columns[1]
+    # Try to find value column — check for common names, then pick any numeric column
+    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+    named_val_cols = [col for col in numeric_cols if col.lower() in ['demand', 'sales', 'value', 'amount', 'profit', 'revenue', 'quantity', 'units', 'units_sold', 'qty']]
+    val_col = named_val_cols[0] if named_val_cols else (numeric_cols[0] if numeric_cols else df.columns[1])
+    
+    print(f"[Prophet] Using date_col='{date_col}', val_col='{val_col}' from columns: {list(df.columns)}")
 
     # Prepare data for Prophet
     prophet_df = pd.DataFrame({
@@ -76,9 +81,15 @@ def get_trend_analysis(df: pd.DataFrame):
     if len(df) == 0:
         return {"data": [], "average_value": 0, "trend_percentage": 0}
 
-    date_col = next((col for col in df.columns if 'date' in col.lower() or 'time' in col.lower()), df.columns[0])
-    val_cols = [col for col in df.columns if col.lower() in ['demand', 'sales', 'value', 'amount', 'profit']]
-    val_col = val_cols[0] if val_cols else df.columns[1]
+    # Try to find a date column
+    date_col = next((col for col in df.columns if 'date' in col.lower() or 'time' in col.lower() or 'month' in col.lower() or 'week' in col.lower() or 'year' in col.lower()), None)
+    if date_col is None:
+        date_col = df.columns[0]
+    
+    # Broaden value column detection
+    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+    named_val_cols = [col for col in numeric_cols if col.lower() in ['demand', 'sales', 'value', 'amount', 'profit', 'revenue', 'quantity', 'units', 'units_sold', 'qty']]
+    val_col = named_val_cols[0] if named_val_cols else (numeric_cols[0] if numeric_cols else df.columns[1])
 
     temp_df = pd.DataFrame({
         'date': pd.to_datetime(df[date_col]).dt.strftime('%Y-%m-%d'),
