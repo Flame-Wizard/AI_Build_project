@@ -13,7 +13,7 @@ app = FastAPI(title="DataBox Analytics API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # Allow all origins for Netlify dynamic preview URLs
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -279,7 +279,8 @@ export function AIInsights({ refreshKey = 0 }: { refreshKey?: number }) {
               )}
             >
               {(() => {
-                const IconComponent = typeof insight.icon === 'string' ? getIcon(insight.icon_type) : insight.icon;
+                const IconComponent = insight.icon_type ? getIcon(insight.icon_type) : insight.icon;
+                if (!IconComponent) return <Zap className="h-4 w-4" />;
                 return <IconComponent className="h-4 w-4" />;
               })()}
             </div>
