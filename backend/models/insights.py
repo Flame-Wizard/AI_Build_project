@@ -96,10 +96,10 @@ def _generate_fallback_insights(df: pd.DataFrame):
 
     return [
         {
-            "title": "Data Overview",
-            "description": f"Dataset has {len(df)} records with an average {val_col} of {mean_val:.0f}.",
-            "type": "info",
-            "icon_type": "CheckCircle"
+            "title": "Enable AI Insights",
+            "description": "Set the GROQ_API_KEY environment variable on Render to activate Llama 3.3 70B AI recommendations.",
+            "type": "warning",
+            "icon_type": "AlertTriangle"
         },
         {
             "title": f"Demand Range",
