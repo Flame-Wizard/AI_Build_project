@@ -363,21 +363,35 @@ const ProphetTooltip = ({ active, payload, label }: any) => {
 }
 
 export function ProphetForecastChart({ refreshKey = 0 }: { refreshKey?: number }) {
-  const [data, setData] = useState(processedProphetData)
+  const [data, setData] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    setLoading(true)
+    setError(null)
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
     fetch(`${apiUrl}/api/forecast/prophet`)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`Server error: ${res.status}`)
+        return res.json()
+      })
       .then(d => {
         if (d && d.data && d.data.length > 0) {
           setData(d.data.map((item: any) => ({
             ...item,
             uncertaintyRange: [item.lower, item.upper]
           })))
+        } else {
+          setError("No forecast data returned. Upload a CSV file first.")
         }
+        setLoading(false)
       })
-      .catch(err => console.error("Error fetching forecast data:", err))
+      .catch(err => {
+        console.error("Error fetching forecast data:", err)
+        setError(`Cannot connect to backend. Check that NEXT_PUBLIC_API_URL is set correctly (currently: ${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"})`)
+        setLoading(false)
+      })
   }, [refreshKey])
 
   return (
@@ -403,8 +417,24 @@ export function ProphetForecastChart({ refreshKey = 0 }: { refreshKey?: number }
           </div>
         </div>
         
-        <div className="min-h-[260px] w-full flex-1 mt-4">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="min-h-[260px] w-full flex-1 mt-4 flex items-center justify-center">
+          {loading ? (
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <p className="text-sm">Running Prophet ML forecast...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center gap-2 text-center max-w-sm">
+              <AlertTriangle className="h-8 w-8 text-amber-500" />
+              <p className="text-sm font-medium text-foreground">Backend not reachable</p>
+              <p className="text-xs text-muted-foreground">{error}</p>
+            </div>
+          ) : data.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-sm text-muted-foreground">Upload a CSV file to generate the Prophet forecast</p>
+            </div>
+          ) : (
+          <ResponsiveContainer width="100%" height={260}>
             <ComposedChart
               data={data}
               margin={{ top: 20, right: 10, left: -10, bottom: 0 }}
@@ -427,6 +457,7 @@ export function ProphetForecastChart({ refreshKey = 0 }: { refreshKey?: number }
               <Line type="monotone" dataKey="yhat" name="Forecast" stroke="var(--chart-4)" strokeWidth={3} strokeDasharray="5 5" dot={false} activeDot={{ r: 6, fill: "var(--chart-4)" }} />
             </ComposedChart>
           </ResponsiveContainer>
+          )}
         </div>
       </div>
     </motion.div>

@@ -125,6 +125,11 @@ export default function Dashboard() {
         <Header />
 
         <div className="p-6 lg:p-8">
+          {/* KPI Metrics Grid - always at top */}
+          <section className="mb-6">
+            <MetricsGrid metrics={metrics} />
+          </section>
+
           {/* File Upload Zone */}
           <FileUpload onUploadSuccess={handleUploadSuccess} />
 
@@ -146,11 +151,6 @@ export default function Dashboard() {
               >View AI Analysis →</button>
             </motion.div>
           )}
-
-          {/* Metrics Grid */}
-          <section className="mb-8">
-            <MetricsGrid metrics={metrics} />
-          </section>
 
           {/* Tab Navigation (Mobile scrollable) */}
           <div className="mb-6 overflow-x-auto pb-2 scrollbar-hide -mx-6 px-6 lg:mx-0 lg:px-0">
