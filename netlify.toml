@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # When deployed, Netlify will look for NEXT_PUBLIC_API_URL here or in UI
+  # You will set this to your Render backend URL (e.g., https://your-backend.onrender.com) in the Netlify UI.
