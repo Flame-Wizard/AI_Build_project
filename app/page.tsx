@@ -10,6 +10,7 @@ import { ForecastMap } from "@/components/forecast-map"
 import { BangladeshMap } from "@/components/bangladesh-map"
 import { ForecastTable, BangladeshForecastTable, AIInsights } from "@/components/forecast-table"
 import { TrendAnalysis, ForecastAccuracy, ParetoChart, ProphetForecastChart } from "@/components/analytics"
+import { DataExplorer } from "@/components/data-explorer"
 import { FileUpload } from "@/components/file-upload"
 import { 
   RegionalDistribution, 
@@ -353,8 +354,21 @@ export default function Dashboard() {
 
                 {/* Pareto Chart */}
                 <div className="grid gap-6 lg:grid-cols-2">
-                  <ParetoChart />
+                  <ParetoChart refreshKey={refreshKey} />
                 </div>
+              </motion.div>
+            )}
+
+            {activeTab === "data" && (
+              <motion.div
+                key="data"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-6"
+              >
+                <DataExplorer refreshKey={refreshKey} />
               </motion.div>
             )}
 

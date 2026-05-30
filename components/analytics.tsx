@@ -211,28 +211,7 @@ export function ForecastAccuracy() {
   )
 }
 
-const paretoData = [
-  { category: "Electronics", profit: 145000 },
-  { category: "Apparel", profit: 65000 },
-  { category: "Home Goods", profit: 35000 },
-  { category: "Sports", profit: 20000 },
-  { category: "Beauty", profit: 12000 },
-  { category: "Toys", profit: 8000 },
-  { category: "Books", profit: 4000 },
-  { category: "Others", profit: 2000 },
-];
-
-const totalProfit = paretoData.reduce((acc, curr) => acc + curr.profit, 0);
-let currentSum = 0;
-const processedParetoData = paretoData.map(item => {
-  currentSum += item.profit;
-  return {
-    ...item,
-    cumulativePercent: parseFloat(((currentSum / totalProfit) * 100).toFixed(1))
-  };
-});
-
-const ParetoTooltip = ({ active, payload, label }: any) => {
+const ParetoTooltip = ({ active, payload, label, metricName }: any) => {
   if (active && payload && payload.length) {
     return (
       <motion.div
@@ -243,8 +222,8 @@ const ParetoTooltip = ({ active, payload, label }: any) => {
         <p className="mb-2 text-sm font-medium text-foreground">{label}</p>
         <div className="flex items-center gap-2 text-sm mb-1">
           <div className="h-2 w-2 rounded-full bg-primary" />
-          <span className="text-muted-foreground">Profit:</span>
-          <span className="font-medium text-foreground">${payload[0]?.value?.toLocaleString()}</span>
+          <span className="text-muted-foreground">{metricName || "Value"}:</span>
+          <span className="font-medium text-foreground">{payload[0]?.value?.toLocaleString()}</span>
         </div>
         <div className="flex items-center gap-2 text-sm">
           <div className="h-2 w-2 rounded-full bg-emerald-500" />
@@ -257,7 +236,45 @@ const ParetoTooltip = ({ active, payload, label }: any) => {
   return null
 }
 
-export function ParetoChart() {
+export function ParetoChart({ refreshKey = 0 }: { refreshKey?: number }) {
+  const [data, setData] = useState<any[]>([])
+  const [metricName, setMetricName] = useState("Profit")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    fetch(`${apiUrl}/api/analytics/pareto`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Server error: ${res.status}`)
+        return res.json()
+      })
+      .then(d => {
+        if (d && d.data && d.data.length > 0) {
+          setData(d.data)
+          if (d.value_metric) {
+            setMetricName(d.value_metric.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()))
+          }
+        } else {
+          setError("No category data found for Pareto analysis.")
+        }
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error("Error fetching Pareto data:", err)
+        setError("Cannot connect to backend.")
+        setLoading(false)
+      })
+  }, [refreshKey])
+
+  // Calculate top 3 percentage if data exists
+  let top3Percent = 0
+  if (data.length > 0) {
+    top3Percent = data.length >= 3 ? data[2].cumulativePercent : data[data.length - 1].cumulativePercent
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -268,34 +285,56 @@ export function ParetoChart() {
       <div className="card-base p-6 flex flex-col h-full justify-between">
         <div className="flex flex-row items-start justify-between pb-4">
           <div>
-            <h3 className="text-base font-semibold text-foreground">Profit Pareto Analysis</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">80/20 Rule based on product profitability</p>
+            <h3 className="text-base font-semibold text-foreground">
+              {metricName} Pareto Analysis
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">80/20 Rule based on category impact</p>
           </div>
-          <div className="flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-            <Package className="h-3.5 w-3.5" />
-            <span>Top 3 = 84%</span>
-          </div>
+          {data.length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              <Package className="h-3.5 w-3.5" />
+              <span>Top {Math.min(3, data.length)} = {Math.round(top3Percent)}%</span>
+            </div>
+          )}
         </div>
-        <div className="min-h-[260px] w-full flex-1 mt-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
-              data={processedParetoData}
-              margin={{ top: 20, right: 20, left: -10, bottom: 0 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="category" stroke="var(--muted-foreground)" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis yAxisId="left" stroke="var(--muted-foreground)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value/1000}k`} />
-              <YAxis yAxisId="right" orientation="right" stroke="var(--muted-foreground)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}%`} />
-              <Tooltip content={<ParetoTooltip />} />
-              <ReferenceLine yAxisId="right" y={80} stroke="var(--chart-4)" strokeDasharray="4 4" label={{ value: '80% Threshold', position: 'insideTopLeft', fill: 'var(--chart-4)', fontSize: 11 }} />
-              <Bar yAxisId="left" dataKey="profit" name="Profit" radius={[4, 4, 0, 0]}>
-                {processedParetoData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={index < 3 ? 'var(--primary)' : 'var(--secondary-foreground)'} fillOpacity={index < 3 ? 1 : 0.4} />
-                ))}
-              </Bar>
-              <Line yAxisId="right" type="monotone" dataKey="cumulativePercent" name="Cumulative %" stroke="var(--emerald-500)" strokeWidth={3} dot={{ r: 4, fill: "var(--emerald-500)", strokeWidth: 0 }} activeDot={{ r: 6 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
+        
+        <div className="min-h-[260px] w-full flex-1 mt-4 flex items-center justify-center">
+          {loading ? (
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <p className="text-sm">Calculating Pareto distribution...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center gap-2 text-center max-w-sm">
+              <AlertTriangle className="h-8 w-8 text-amber-500" />
+              <p className="text-sm font-medium text-foreground">Analysis Unavailable</p>
+              <p className="text-xs text-muted-foreground">{error}</p>
+            </div>
+          ) : data.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-sm text-muted-foreground">Upload a CSV file with categories and numeric values</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart
+                data={data}
+                margin={{ top: 20, right: 20, left: -10, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="category" stroke="var(--muted-foreground)" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="left" stroke="var(--muted-foreground)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => value > 1000 ? `${(value/1000).toFixed(1)}k` : value} />
+                <YAxis yAxisId="right" orientation="right" stroke="var(--muted-foreground)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}%`} />
+                <Tooltip content={<ParetoTooltip metricName={metricName} />} />
+                <ReferenceLine yAxisId="right" y={80} stroke="var(--chart-4)" strokeDasharray="4 4" label={{ value: '80% Threshold', position: 'insideTopLeft', fill: 'var(--chart-4)', fontSize: 11 }} />
+                <Bar yAxisId="left" dataKey="value" name={metricName} radius={[4, 4, 0, 0]}>
+                  {data.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index < 3 ? 'var(--primary)' : 'var(--secondary-foreground)'} fillOpacity={index < 3 ? 1 : 0.4} />
+                  ))}
+                </Bar>
+                <Line yAxisId="right" type="monotone" dataKey="cumulativePercent" name="Cumulative %" stroke="var(--emerald-500)" strokeWidth={3} dot={{ r: 4, fill: "var(--emerald-500)", strokeWidth: 0 }} activeDot={{ r: 6 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </motion.div>

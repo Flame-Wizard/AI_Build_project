@@ -146,6 +146,107 @@ async def get_summary():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating summary: {str(e)}")
 
+@app.get("/api/analytics/pareto")
+async def get_pareto():
+    """Generates Pareto (80/20) analysis dynamically from the uploaded CSV."""
+    global global_df
+    try:
+        if global_df.empty:
+            # Fallback static data
+            pareto_data = [
+                {"category": "Electronics", "value": 145000},
+                {"category": "Apparel", "value": 65000},
+                {"category": "Home Goods", "value": 35000},
+                {"category": "Sports", "value": 20000},
+                {"category": "Beauty", "value": 12000},
+            ]
+        else:
+            # 1. Find a categorical column (string type)
+            cat_cols = [col for col in global_df.columns if global_df[col].dtype == 'object' or global_df[col].dtype == 'string']
+            # Prioritize columns like 'brand', 'category', 'product', 'platform'
+            cat_col = next((c for c in cat_cols if any(kw in c.lower() for kw in ['brand', 'category', 'platform', 'type', 'name'])), None)
+            if not cat_col and cat_cols:
+                cat_col = cat_cols[0]
+            
+            # 2. Find a numeric column
+            num_cols = [col for col in global_df.columns if pd.api.types.is_numeric_dtype(global_df[col])]
+            num_col = next((c for c in num_cols if any(kw in c.lower() for kw in ['revenue', 'profit', 'sales', 'value', 'amount', 'price', 'count', 'units'])), None)
+            if not num_col and num_cols:
+                num_col = num_cols[0]
+                
+            if not cat_col or not num_col:
+                 return {"data": []}
+
+            # Group by category, sum the value
+            grouped = global_df.groupby(cat_col)[num_col].sum().reset_index()
+            # Sort descending
+            grouped = grouped.sort_values(by=num_col, ascending=False).head(10) # Top 10
+            
+            pareto_data = []
+            for _, row in grouped.iterrows():
+                val = row[num_col]
+                # Ensure value is normal float/int and >= 0
+                if pd.notna(val) and val >= 0:
+                    pareto_data.append({
+                        "category": str(row[cat_col])[:20], # truncate long names
+                        "value": float(val)
+                    })
+
+        if not pareto_data:
+             return {"data": []}
+
+        # Calculate cumulative percentages
+        total_val = sum(item["value"] for item in pareto_data)
+        if total_val == 0:
+            return {"data": []}
+            
+        current_sum = 0
+        processed_data = []
+        for item in pareto_data:
+            current_sum += item["value"]
+            processed_data.append({
+                "category": item["category"],
+                "value": item["value"],
+                "cumulativePercent": round((current_sum / total_val) * 100, 1)
+            })
+            
+        return {"data": processed_data, "value_metric": num_col if not global_df.empty else "Profit"}
+
+    except Exception as e:
+        print(f"[ERROR] Pareto analysis failed: {e}")
+        return {"data": []}
+
+@app.get("/api/data/raw")
+async def get_raw_data(page: int = 1, limit: int = 50):
+    """Returns paginated raw data from the uploaded CSV."""
+    global global_df
+    try:
+        if global_df.empty:
+            return {"columns": [], "data": [], "total_rows": 0, "page": page, "total_pages": 0}
+
+        total_rows = len(global_df)
+        total_pages = (total_rows + limit - 1) // limit
+        
+        # Paginate
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        df_page = global_df.iloc[start_idx:end_idx]
+
+        # Convert to dictionary (handle NaNs by replacing with None)
+        # fillna('') ensures JSON serialization doesn't break on NaN
+        records = df_page.fillna("").to_dict(orient="records")
+        
+        return {
+            "columns": list(global_df.columns),
+            "data": records,
+            "total_rows": total_rows,
+            "page": page,
+            "total_pages": total_pages
+        }
+    except Exception as e:
+        print(f"[ERROR] Raw data fetch failed: {e}")
+        return {"columns": [], "data": [], "total_rows": 0, "page": 1, "total_pages": 0}
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "has_data": not global_df.empty, "rows": len(global_df)}
