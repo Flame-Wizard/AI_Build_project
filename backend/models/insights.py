@@ -1,105 +1,116 @@
 import os
 import json
 import pandas as pd
-from huggingface_hub import InferenceClient
+from groq import Groq
 
 def generate_insights(df: pd.DataFrame, forecast_data: list = None):
     """
-    Generate insights using a Hugging Face model (like Gemma or GLM-4) 
-    via the Hugging Face Inference API.
+    Generate AI insights using Groq's free LLM API (Llama 3.3 70B).
+    Falls back to rule-based insights if API key is missing or call fails.
     """
     if len(df) == 0:
         return []
 
     # Get API key from environment
-    hf_token = os.environ.get("HF_TOKEN")
+    groq_key = os.environ.get("GROQ_API_KEY")
     
     # If no token, return fallback insights based on basic stats
-    if not hf_token:
+    if not groq_key:
         return _generate_fallback_insights(df)
 
-    # Initialize client with a free model (e.g., google/gemma-2b-it or similar)
     try:
-        client = InferenceClient(model="google/gemma-1.1-2b-it", token=hf_token)
-        
+        client = Groq(api_key=groq_key)
+
         # Create a summary of the data
-        summary = df.describe().to_json()
-        
+        summary = df.describe().to_dict()
+        columns = list(df.columns)
+        row_count = len(df)
+
         forecast_context = ""
         if forecast_data:
             future_only = [f for f in forecast_data if f.get("actual") is None]
             if future_only:
                 avg_future = sum([f['yhat'] for f in future_only]) / len(future_only)
                 max_future = max([f['yhat'] for f in future_only])
-                forecast_context = f"\nProphet ML Forecast: Projected average future value is {avg_future:.2f}, peaking at {max_future:.2f}."
+                forecast_context = f"\nProphet ML Forecast: The model projects an average future demand of {avg_future:.2f}, with a peak forecast of {max_future:.2f}."
 
-        prompt = f"""
-        You are a Data Scientist AI. Analyze the following statistical summary of a company's historical data.
-        Historical data summary: {summary}
-        {forecast_context}
-        
-        Based on this data AND the Prophet machine learning forecast, provide exactly 3 key predictive business insights.
-        
-        Respond ONLY in the following JSON format:
-        [
-          {{"title": "Short title", "description": "1 sentence predictive description", "type": "warning|success|info", "icon_type": "AlertTriangle|CheckCircle|Zap"}}
-        ]
-        """
-        
-        response = client.text_generation(
-            prompt,
-            max_new_tokens=300,
+        prompt = f"""You are a Data Scientist AI analyzing a company's operational data.
+
+Dataset: {row_count} rows, columns: {columns}
+Key statistics: {json.dumps({k: {s: round(v, 2) for s, v in vals.items()} for k, vals in summary.items()}, indent=2)}
+{forecast_context}
+
+Based on this data AND the Prophet ML forecast, provide exactly 3 actionable predictive business insights.
+
+IMPORTANT: Respond ONLY with a valid JSON array. No explanation, no markdown, no extra text.
+[
+  {{"title": "Short title", "description": "1 sentence predictive description", "type": "warning|success|info", "icon_type": "AlertTriangle|CheckCircle|Zap"}}
+]"""
+
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
             temperature=0.3,
-            return_full_text=False
+            max_tokens=400,
         )
-        
+
+        response_text = chat_completion.choices[0].message.content.strip()
+
         # Try to parse the JSON response
         try:
-            # Clean up potential markdown formatting from the response
-            cleaned_resp = response.strip()
-            if cleaned_resp.startswith("```json"):
-                cleaned_resp = cleaned_resp[7:]
-            if cleaned_resp.endswith("```"):
-                cleaned_resp = cleaned_resp[:-3]
-                
-            insights = json.loads(cleaned_resp)
-            return insights
-        except json.JSONDecodeError:
-            print("Failed to parse JSON from LLM:", response)
+            # Clean up potential markdown formatting
+            cleaned = response_text
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+
+            insights = json.loads(cleaned.strip())
+            if isinstance(insights, list) and len(insights) > 0:
+                return insights
             return _generate_fallback_insights(df)
-            
+
+        except json.JSONDecodeError:
+            print("Failed to parse JSON from LLM:", response_text)
+            return _generate_fallback_insights(df)
+
     except Exception as e:
-        print(f"Error calling Hugging Face API: {e}")
+        print(f"Error calling Groq API: {e}")
         return _generate_fallback_insights(df)
+
 
 def _generate_fallback_insights(df: pd.DataFrame):
     """Fallback rule-based insights if API fails or token is missing"""
     val_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
     if not val_cols:
         return [{"title": "Data Loaded", "description": f"Successfully loaded {len(df)} rows.", "type": "info", "icon_type": "CheckCircle"}]
-        
+
     val_col = val_cols[0]
     mean_val = df[val_col].mean()
     max_val = df[val_col].max()
-    
-    insights = [
+    min_val = df[val_col].min()
+    std_val = df[val_col].std()
+    cv = (std_val / mean_val * 100) if mean_val != 0 else 0
+
+    return [
         {
             "title": "Data Overview",
-            "description": f"Dataset contains {len(df)} records with an average {val_col} of {mean_val:.2f}.",
+            "description": f"Dataset has {len(df)} records with an average {val_col} of {mean_val:.0f}.",
             "type": "info",
             "icon_type": "CheckCircle"
         },
         {
-            "title": f"Peak {val_col.title()}",
-            "description": f"The maximum {val_col} recorded was {max_val:.2f}.",
+            "title": f"Demand Range",
+            "description": f"{val_col.title()} ranges from {min_val:.0f} to {max_val:.0f} — set your reorder points accordingly.",
             "type": "success",
             "icon_type": "Zap"
         },
         {
-            "title": "API Key Missing",
-            "description": "Set HF_TOKEN environment variable to enable Gemma AI insights.",
-            "type": "warning",
-            "icon_type": "AlertTriangle"
+            "title": "Volatility Alert" if cv > 20 else "Stable Trend",
+            "description": f"Demand variability (CV={cv:.1f}%) is {'high — consider safety stock buffers.' if cv > 20 else 'low — operations are stable.'}",
+            "type": "warning" if cv > 20 else "success",
+            "icon_type": "AlertTriangle" if cv > 20 else "CheckCircle"
         }
     ]
-    return insights

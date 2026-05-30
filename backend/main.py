@@ -10,6 +10,7 @@ from models.insights import generate_insights
 app = FastAPI(title="DataBox Analytics API")
 
 # Allow Next.js frontend to communicate with FastAPI
+# Requires GROQ_API_KEY environment variable for AI insights
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # Allow all origins for Netlify dynamic preview URLs
