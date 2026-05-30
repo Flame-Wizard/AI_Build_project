@@ -21,7 +21,10 @@ def generate_insights(df: pd.DataFrame, forecast_data: list = None):
     try:
         client = Groq(api_key=groq_key)
 
-        # Create a summary of the data
+        # Detect data type based on column names
+        cols_lower = [c.lower() for c in df.columns]
+        is_ecommerce = any(kw in ' '.join(cols_lower) for kw in ['price', 'rating', 'brand', 'product', 'discount', 'review'])
+        
         summary = df.describe().to_dict()
         columns = list(df.columns)
         row_count = len(df)
@@ -32,19 +35,25 @@ def generate_insights(df: pd.DataFrame, forecast_data: list = None):
             if future_only:
                 avg_future = sum([f['yhat'] for f in future_only]) / len(future_only)
                 max_future = max([f['yhat'] for f in future_only])
-                forecast_context = f"\nProphet ML Forecast: The model projects an average future demand of {avg_future:.2f}, with a peak forecast of {max_future:.2f}."
+                forecast_context = f"\nProphet ML Forecast: The model projects an average future value of {avg_future:.2f}, peaking at {max_future:.2f}."
 
-        prompt = f"""You are a Data Scientist AI analyzing a company's operational data.
+        if is_ecommerce:
+            domain_context = "This is an e-commerce product dataset. Focus insights on pricing strategy, discount effectiveness, brand performance, ratings quality, and inventory/availability patterns."
+        else:
+            domain_context = "This is a time-series business dataset. Focus insights on demand trends, forecasting accuracy, seasonal patterns, and operational recommendations."
+
+        prompt = f"""You are a Data Scientist AI analyzing a company's data.
 
 Dataset: {row_count} rows, columns: {columns}
-Key statistics: {json.dumps({k: {s: round(v, 2) for s, v in vals.items()} for k, vals in summary.items()}, indent=2)}
+{domain_context}
+Key statistics: {json.dumps({k: {s: round(v, 2) for s, v in vals.items()} for k, vals in summary.items() if isinstance(vals, dict)}, indent=2)}
 {forecast_context}
 
-Based on this data AND the Prophet ML forecast, provide exactly 3 actionable predictive business insights.
+Provide exactly 3 specific, actionable business insights based on this data.
 
 IMPORTANT: Respond ONLY with a valid JSON array. No explanation, no markdown, no extra text.
 [
-  {{"title": "Short title", "description": "1 sentence predictive description", "type": "warning|success|info", "icon_type": "AlertTriangle|CheckCircle|Zap"}}
+  {{"title": "Short title", "description": "1 sentence actionable insight", "type": "warning|success|info", "icon_type": "AlertTriangle|CheckCircle|Zap"}}
 ]"""
 
         chat_completion = client.chat.completions.create(

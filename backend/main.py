@@ -40,32 +40,41 @@ async def upload_csv(file: UploadFile = File(...)):
 @app.get("/api/forecast/prophet", response_model=ProphetResponse)
 async def get_prophet_forecast():
     global global_df, global_forecast_cache
-    # If no data is uploaded, use some default dummy data to prevent frontend crash
-    if global_df.empty:
-        dummy_data = pd.DataFrame({
-            'date': pd.date_range(start='2023-01-01', periods=30, freq='D'),
-            'demand': [100 + (i * 2) + (i % 5 * 10) for i in range(30)]
-        })
-        forecast = generate_forecast(dummy_data, periods=14)
-    else:
-        forecast = generate_forecast(global_df, periods=14)
-    
-    global_forecast_cache = forecast
-    return {"data": forecast}
+    try:
+        if global_df.empty:
+            dummy_data = pd.DataFrame({
+                'date': pd.date_range(start='2023-01-01', periods=30, freq='D'),
+                'demand': [100 + (i * 2) + (i % 5 * 10) for i in range(30)]
+            })
+            forecast = generate_forecast(dummy_data, periods=14)
+        else:
+            # Sample large CSVs to prevent timeout (max 500 rows for Prophet)
+            df_sample = global_df if len(global_df) <= 500 else global_df.tail(500)
+            forecast = generate_forecast(df_sample, periods=14)
+        
+        global_forecast_cache = forecast
+        return {"data": forecast}
+    except Exception as e:
+        print(f"[ERROR] Prophet forecast failed: {e}")
+        # Return a minimal fallback so frontend doesn't crash
+        return {"data": []}
 
 @app.get("/api/analytics/trend", response_model=TrendResponse)
 async def get_trend():
     global global_df
-    if global_df.empty:
-        dummy_data = pd.DataFrame({
-            'date': pd.date_range(start='2023-01-01', periods=30, freq='D'),
-            'demand': [100 + (i * 2) + (i % 5 * 10) for i in range(30)]
-        })
-        trend = get_trend_analysis(dummy_data)
-    else:
-        trend = get_trend_analysis(global_df)
-        
-    return trend
+    try:
+        if global_df.empty:
+            dummy_data = pd.DataFrame({
+                'date': pd.date_range(start='2023-01-01', periods=30, freq='D'),
+                'demand': [100 + (i * 2) + (i % 5 * 10) for i in range(30)]
+            })
+            return get_trend_analysis(dummy_data)
+        else:
+            df_sample = global_df if len(global_df) <= 500 else global_df.tail(500)
+            return get_trend_analysis(df_sample)
+    except Exception as e:
+        print(f"[ERROR] Trend analysis failed: {e}")
+        return {"data": [], "average_value": 0, "trend_percentage": 0}
 
 @app.get("/api/insights", response_model=InsightsResponse)
 async def get_insights():

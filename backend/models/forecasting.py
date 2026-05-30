@@ -2,67 +2,112 @@ import pandas as pd
 from prophet import Prophet
 import io
 
-def generate_forecast(df: pd.DataFrame, periods: int = 4):
+def _find_columns(df: pd.DataFrame):
+    """
+    Intelligently detect date and value columns from any CSV structure.
+    Returns (date_col_or_None, val_col).
+    """
+    # Date column detection
+    date_col = next(
+        (col for col in df.columns
+         if any(kw in col.lower() for kw in ['date', 'time', 'month', 'week', 'year', 'day', 'period'])),
+        None
+    )
+
+    # Numeric columns for value
+    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+
+    # Priority: known sales/demand keywords
+    priority_keywords = [
+        'demand', 'sales', 'revenue', 'amount', 'profit', 'value',
+        'quantity', 'units', 'units_sold', 'qty', 'listed_price',
+        'discounted', 'price', 'rating', 'average_r', 'reviews'
+    ]
+    for kw in priority_keywords:
+        for col in numeric_cols:
+            if kw in col.lower():
+                return date_col, col
+
+    # Fallback: use the first numeric column
+    if numeric_cols:
+        return date_col, numeric_cols[0]
+
+    # Last resort: use second column
+    return date_col, df.columns[1] if len(df.columns) > 1 else df.columns[0]
+
+
+def generate_forecast(df: pd.DataFrame, periods: int = 14):
     """
     Generate forecast using Prophet.
-    Expected df format: requires at least 'date' and 'demand' or 'value' columns.
-    If not, we will try to infer or fallback.
+    Works with ANY CSV — if no date column is found, row index is used as time axis.
     """
     if len(df) == 0:
         return []
 
-    # Try to find a date column
-    date_col = next((col for col in df.columns if 'date' in col.lower() or 'time' in col.lower() or 'month' in col.lower() or 'week' in col.lower() or 'year' in col.lower()), None)
-    if date_col is None:
-        date_col = df.columns[0]  # Fallback to first column
-    
-    # Try to find value column — check for common names, then pick any numeric column
-    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
-    named_val_cols = [col for col in numeric_cols if col.lower() in ['demand', 'sales', 'value', 'amount', 'profit', 'revenue', 'quantity', 'units', 'units_sold', 'qty']]
-    val_col = named_val_cols[0] if named_val_cols else (numeric_cols[0] if numeric_cols else df.columns[1])
-    
-    print(f"[Prophet] Using date_col='{date_col}', val_col='{val_col}' from columns: {list(df.columns)}")
+    # Cap to last 500 rows for Render free tier performance
+    if len(df) > 500:
+        df = df.tail(500).reset_index(drop=True)
 
-    # Prepare data for Prophet
-    prophet_df = pd.DataFrame({
-        'ds': pd.to_datetime(df[date_col]),
-        'y': pd.to_numeric(df[val_col], errors='coerce')
-    }).dropna()
+    date_col, val_col = _find_columns(df)
+    print(f"[Prophet] date_col='{date_col}', val_col='{val_col}', columns={list(df.columns)}")
+
+    # Build the ds column
+    if date_col:
+        try:
+            ds_series = pd.to_datetime(df[date_col])
+        except Exception:
+            # If date parsing fails, fall back to sequential
+            ds_series = pd.date_range(start='2023-01-01', periods=len(df), freq='D')
+    else:
+        # No date column — treat each row as one day sequentially
+        ds_series = pd.date_range(start='2023-01-01', periods=len(df), freq='D')
+
+    # Build the y column
+    y_series = pd.to_numeric(df[val_col], errors='coerce')
+
+    prophet_df = pd.DataFrame({'ds': ds_series, 'y': y_series}).dropna()
 
     if len(prophet_df) < 2:
         return []
 
-    # Initialize and fit Prophet
-    m = Prophet(yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
+    # Fit Prophet
+    m = Prophet(
+        yearly_seasonality=False,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        uncertainty_samples=100
+    )
     m.fit(prophet_df)
 
-    # Calculate frequency for future dataframe
-    diff = prophet_df['ds'].diff().median()
-    freq = 'D'
-    if pd.notnull(diff):
-        if diff >= pd.Timedelta(days=28):
-            freq = 'ME'
-        elif diff >= pd.Timedelta(days=7):
-            freq = 'W'
+    # Determine frequency for future dataframe
+    if date_col:
+        diff = prophet_df['ds'].diff().median()
+        freq = 'D'
+        if pd.notnull(diff):
+            if diff >= pd.Timedelta(days=28):
+                freq = 'ME'
+            elif diff >= pd.Timedelta(days=7):
+                freq = 'W'
+    else:
+        freq = 'D'
 
-    # Make future dataframe
     future = m.make_future_dataframe(periods=periods, freq=freq)
     forecast = m.predict(future)
 
     # Format output
-    result = []
     actuals_dict = dict(zip(prophet_df['ds'].dt.strftime('%Y-%m-%d'), prophet_df['y']))
+    result = []
 
     for _, row in forecast.iterrows():
         date_str = row['ds'].strftime('%Y-%m-%d')
         actual_val = actuals_dict.get(date_str)
-        
-        # Anomaly detection: flag if actual value falls outside 80% confidence interval
+
+        # Anomaly detection
         is_anomaly = False
         if actual_val is not None:
             if actual_val < row['yhat_lower'] or actual_val > row['yhat_upper']:
                 is_anomaly = True
-        
+
         result.append({
             "date": date_str,
             "actual": actual_val,
@@ -74,37 +119,39 @@ def generate_forecast(df: pd.DataFrame, periods: int = 4):
 
     return result
 
+
 def get_trend_analysis(df: pd.DataFrame):
     """
-    Generate trend data (moving average or simple smoothing) for the frontend chart.
+    Generate trend data for the frontend chart. Works with any CSV.
     """
     if len(df) == 0:
         return {"data": [], "average_value": 0, "trend_percentage": 0}
 
-    # Try to find a date column
-    date_col = next((col for col in df.columns if 'date' in col.lower() or 'time' in col.lower() or 'month' in col.lower() or 'week' in col.lower() or 'year' in col.lower()), None)
-    if date_col is None:
-        date_col = df.columns[0]
-    
-    # Broaden value column detection
-    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
-    named_val_cols = [col for col in numeric_cols if col.lower() in ['demand', 'sales', 'value', 'amount', 'profit', 'revenue', 'quantity', 'units', 'units_sold', 'qty']]
-    val_col = named_val_cols[0] if named_val_cols else (numeric_cols[0] if numeric_cols else df.columns[1])
+    if len(df) > 500:
+        df = df.tail(500).reset_index(drop=True)
+
+    date_col, val_col = _find_columns(df)
+
+    # Build date series
+    if date_col:
+        try:
+            date_series = pd.to_datetime(df[date_col]).dt.strftime('%Y-%m-%d')
+        except Exception:
+            date_series = pd.date_range(start='2023-01-01', periods=len(df), freq='D').strftime('%Y-%m-%d')
+    else:
+        date_series = pd.date_range(start='2023-01-01', periods=len(df), freq='D').strftime('%Y-%m-%d')
 
     temp_df = pd.DataFrame({
-        'date': pd.to_datetime(df[date_col]).dt.strftime('%Y-%m-%d'),
+        'date': date_series,
         'value': pd.to_numeric(df[val_col], errors='coerce')
     }).dropna().sort_values('date')
-    
-    if len(temp_df) < 2:
-         return {"data": [], "average_value": 0, "trend_percentage": 0}
 
-    # Calculate simple moving average for trend
-    temp_df['trend'] = temp_df['value'].rolling(window=min(3, len(temp_df)), min_periods=1).mean()
-    
+    if len(temp_df) < 2:
+        return {"data": [], "average_value": 0, "trend_percentage": 0}
+
+    temp_df['trend'] = temp_df['value'].rolling(window=min(10, len(temp_df)), min_periods=1).mean()
+
     avg_val = temp_df['value'].mean()
-    
-    # Calculate trend percentage (first half vs second half)
     half = len(temp_df) // 2
     first_half = temp_df['value'].iloc[:half].mean()
     second_half = temp_df['value'].iloc[half:].mean()
